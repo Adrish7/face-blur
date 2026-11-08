@@ -1,0 +1,9 @@
+{
+    "name": "face-blur",
+    "private": true,
+    "type": "module",
+    "description": "Blur every face in a folder of photos, in the browser. Nothing is uploaded.",
+    "scripts": {
+        "start": "node serve.mjs"
+    }
+}

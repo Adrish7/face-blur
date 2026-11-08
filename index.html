@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <title>Face Blur</title>
+        <meta name="description" content="Blur every face in a folder of photos, right in your browser. Nothing is uploaded." />
+        <meta name="color-scheme" content="light dark" />
+        <link
+            rel="icon"
+            href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2215%22 fill=%22%231f7a5c%22/%3E%3Cellipse cx=%2216%22 cy=%2215%22 rx=%227%22 ry=%228.5%22 fill=%22white%22 opacity=%220.6%22/%3E%3C/svg%3E"
+        />
+        <link rel="stylesheet" href="./style.css" />
+        <script>
+            // The face models run several times faster on the CPU with more
+            // than one thread, which needs a cross-origin isolated page.
+            // coi-sw.js adds the headers for that, then the page reloads once.
+            (() => {
+                const start = () => {
+                    if (window.appStarted) return;
+                    window.appStarted = true;
+                    const s = document.createElement("script");
+                    s.type = "module";
+                    s.src = "./app.js";
+                    document.head.append(s);
+                };
+                let tried = true;
+                try {
+                    tried = sessionStorage.getItem("coi-tried") === "1";
+                    sessionStorage.setItem("coi-tried", "1");
+                } catch {}
+                if (self.crossOriginIsolated || tried || !("serviceWorker" in navigator) || !self.isSecureContext) return start();
+                setTimeout(start, 4000);
+                navigator.serviceWorker
+                    .register("./coi-sw.js")
+                    .then(() => navigator.serviceWorker.ready)
+                    .then(() => location.reload())
+                    .catch(start);
+            })();
+        </script>
+    </head>
+    <body>
+        <header class="bar">
+            <div class="brand">
+                <strong>Face Blur</strong>
+                <span class="muted" id="status">Loading the face models…</span>
+            </div>
+
+            <div class="progress" id="progress" hidden>
+                <span id="progress-text"></span>
+                <span class="track"><span class="fill" id="progress-bar"></span></span>
+            </div>
+
+            <div class="actions">
+                <label class="slider" title="How far past the face the blur reaches">
+                    <span>Blur size</span>
+                    <input type="range" id="size" min="0.8" max="1.6" step="0.05" value="1" />
+                </label>
+                <button type="button" class="ghost" id="add-folder" hidden>+ Folder</button>
+                <button type="button" class="ghost" id="add-photos" hidden>+ Photos</button>
+                <button type="button" class="ghost" id="clear" hidden>Start over</button>
+                <button type="button" class="ghost" id="zip" hidden>Download ZIP</button>
+                <button type="button" class="primary" id="save" hidden>Save to a folder</button>
+            </div>
+        </header>
+
+        <main class="layout">
+            <aside class="side">
+                <section class="people" aria-labelledby="people-title">
+                    <div class="people-head">
+                        <h2 id="people-title">Leave clear</h2>
+                        <button type="button" class="ghost small" id="add-person">+ Add person</button>
+                    </div>
+                    <p class="muted hint" id="people-hint">
+                        Optional. Add one photo of each person whose face should stay visible, like you or your team. More photos of
+                        someone make the match more reliable.
+                    </p>
+                    <div class="chips" id="chips"></div>
+                </section>
+                <nav class="list" id="list" aria-label="Photos"></nav>
+            </aside>
+
+            <section class="viewer-wrap">
+                <div class="viewer" id="viewer">
+                    <div class="empty" id="empty">
+                        <h1>Blur every face in a folder of photos</h1>
+                        <p class="lede">It all happens in your browser. Your photos are never uploaded.</p>
+                        <div class="pick">
+                            <button type="button" class="primary big" id="pick-folder">Choose a folder</button>
+                            <button type="button" class="ghost big" id="pick-photos">Choose photos</button>
+                        </div>
+                        <p class="muted">or drop them here · JPG, PNG, HEIC, WebP, AVIF</p>
+                        <ol class="how">
+                            <li><b>Optional:</b> under <b>Leave clear</b>, add a photo of anyone who should stay visible.</li>
+                            <li>Choose your photos. Every other face is blurred.</li>
+                            <li>Check them, then save. You get a new folder of blurred copies; your originals aren't changed.</li>
+                        </ol>
+                        <p class="credit">
+                            Saved photos carry no location or camera details. The tool can miss faces that are turned away or mostly
+                            hidden, so check every photo before you share it. Faces are found with InsightFace's SCRFD and ArcFace
+                            models (non-commercial use) on
+                            <a href="https://onnxruntime.ai" target="_blank" rel="noopener">ONNX Runtime</a>.
+                        </p>
+                    </div>
+                    <div class="stage" id="stage" hidden>
+                        <canvas id="view"></canvas>
+                        <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+                        <div class="labels" id="labels"></div>
+                        <div class="busy" id="busy" hidden></div>
+                    </div>
+                </div>
+
+                <footer class="hintbar">
+                    <span><b>Click a face</b> to blur or unblur it</span>
+                    <span><b>Drag</b> to blur a face it missed</span>
+                    <span class="keys"><b>Hold Space</b> to see the original</span>
+                    <span class="keys"><b>← →</b> next photo</span>
+                    <span class="keys"><b>⌘Z</b> undo</span>
+                    <span class="zoom">
+                        <button type="button" class="ghost small" id="peek">Original</button>
+                        <button type="button" class="ghost small" id="undo" aria-label="Undo">Undo</button>
+                        <button type="button" class="ghost small" id="zoom-out" aria-label="Zoom out">−</button>
+                        <button type="button" class="ghost small" id="zoom-fit">Fit</button>
+                        <button type="button" class="ghost small" id="zoom-in" aria-label="Zoom in">+</button>
+                    </span>
+                </footer>
+            </section>
+        </main>
+
+        <div class="dropzone" id="dropzone" hidden>Drop to blur these photos</div>
+        <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+        <input type="file" id="folder-input" webkitdirectory multiple hidden />
+        <input type="file" id="photos-input" accept="image/*,.heic,.heif,.avif" multiple hidden />
+        <input type="file" id="person-input" accept="image/*,.heic,.heif,.avif" multiple hidden />
+    </body>
+</html>
