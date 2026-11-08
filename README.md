@@ -37,4 +37,4 @@ To run it locally: `npm start`, then open http://localhost:5177.
 
 ## Licences
 
-The face models are InsightFace's and are released for **non-commercial use only**. ONNX Runtime is MIT-licensed and libheif-js is LGPL.
+The face models are InsightFace's and are released for **non-commercial use only**. ONNX Runtime is MIT-licensed and libheif-js is LGPL. The typeface is [Schibsted Grotesk](https://github.com/schibsted/schibsted-grotesk), self-hosted under the SIL Open Font License (`fonts/OFL.txt`).

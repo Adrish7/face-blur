@@ -25,7 +25,12 @@ const $ = (id) => document.getElementById(id);
 const els = {
     status: $("status"),
     progress: $("progress"),
-    progressText: $("progress-text"),
+    count: $("count"),
+    position: $("position"),
+    prev: $("prev"),
+    next: $("next"),
+    hint: $("hint"),
+    dropText: $("dropzone-text"),
     progressBar: $("progress-bar"),
     size: $("size"),
     addFolder: $("add-folder"),
@@ -64,7 +69,10 @@ const state = {
     ready: null,
     status: "Loading the face models…",
     working: false,
+    // What the save or ZIP button is doing right now, and how far along it is
     saving: "",
+    savingKind: "",
+    saveProgress: 0,
     size: 1,
     zoom: 1,
     peek: false,
@@ -479,7 +487,7 @@ async function saveToFolder() {
         const out = await parent.getDirectoryHandle(name, { create: true });
         const dirs = new Map([["", out]]);
         for (let i = 0; i < files.length; i++) {
-            state.saving = `Saving ${i + 1} of ${files.length}…`;
+            Object.assign(state, { saving: `Saving ${i + 1} of ${files.length}`, savingKind: "folder", saveProgress: i / files.length });
             render();
             const { photo, path, type } = files[i];
             const blob = await finished(photo, type);
@@ -501,7 +509,7 @@ async function saveToFolder() {
         console.error(error);
         toast(`Saving stopped: ${message(error)}`);
     } finally {
-        state.saving = "";
+        Object.assign(state, { saving: "", savingKind: "", saveProgress: 0 });
         render();
     }
 }
@@ -536,7 +544,7 @@ async function downloadZip() {
     let parts = 0;
     const flush = async (last) => {
         parts++;
-        state.saving = "Making the ZIP…";
+        Object.assign(state, { saving: "Making the ZIP", saveProgress: 1 });
         render();
         const zip = await makeZip(part);
         download(zip, last && parts === 1 ? `${root}.zip` : `${root} (part ${parts}).zip`);
@@ -546,7 +554,7 @@ async function downloadZip() {
     };
     try {
         for (let i = 0; i < files.length; i++) {
-            state.saving = `Preparing ${i + 1} of ${files.length}…`;
+            Object.assign(state, { saving: `Preparing ${i + 1} of ${files.length}`, savingKind: "zip", saveProgress: i / files.length });
             render();
             const { photo, path, type } = files[i];
             const blob = await finished(photo, type);
@@ -560,7 +568,7 @@ async function downloadZip() {
         console.error(error);
         toast(`Making the ZIP stopped: ${message(error)}`);
     } finally {
-        state.saving = "";
+        Object.assign(state, { saving: "", savingKind: "", saveProgress: 0 });
         render();
     }
 }
@@ -607,6 +615,7 @@ function layout() {
     els.overlay.setAttribute("viewBox", `0 0 ${p.width} ${p.height}`);
     // A finger pans a zoomed-in photo; at full view it draws
     els.overlay.style.touchAction = state.zoom > 1 ? "pan-x pan-y" : "none";
+    settleTags();
 }
 
 function zoomTo(zoom, anchor) {
@@ -672,14 +681,36 @@ function drawOverlay(p) {
             const tag = document.createElement("span");
             const known = f.match && names.get(f.match);
             tag.className = `tag${known ? " known" : ""}`;
-            tag.textContent = known ? `${known} · not blurred` : "Not blurred";
+            tag.textContent = known || "Not blurred";
+            tag.title = known ? `${known} is left clear` : "Not blurred";
             tag.style.left = `${(s.cx / p.width) * 100}%`;
-            tag.style.top = `${((s.cy - s.ry) / p.height) * 100}%`;
+            tag.dataset.above = `${((s.cy - s.ry) / p.height) * 100}%`;
+            tag.dataset.below = `${((s.cy + s.ry) / p.height) * 100}%`;
+            tag.style.top = tag.dataset.above;
             labels.push(tag);
         }
     }
     els.overlay.replaceChildren(...nodes);
     els.labels.replaceChildren(...labels);
+    settleTags();
+}
+
+// Two faces side by side would stack their labels: drop the later one below its face
+function settleTags() {
+    const top = els.viewer.getBoundingClientRect().top;
+    const placed = [];
+    for (const tag of els.labels.children) {
+        tag.classList.remove("below");
+        tag.style.top = tag.dataset.above;
+        let box = tag.getBoundingClientRect();
+        const hits = (b) => placed.some((p) => b.left < p.right + 4 && b.right > p.left - 4 && b.top < p.bottom + 2 && b.bottom > p.top - 2);
+        if (box.top < top || hits(box)) {
+            tag.classList.add("below");
+            tag.style.top = tag.dataset.below;
+            box = tag.getBoundingClientRect();
+        }
+        placed.push(box);
+    }
 }
 
 function renderViewer() {
@@ -692,6 +723,8 @@ function renderViewer() {
     }
     const waiting = ["queued", "decoding", "detecting"].includes(p.status);
     els.busy.hidden = !waiting && p.status !== "error";
+    els.busy.classList.toggle("working", waiting);
+    els.busy.classList.toggle("error", p.status === "error");
     els.busy.textContent =
         p.status === "error"
             ? p.error
@@ -754,10 +787,17 @@ function renderList() {
         }
         if (p.thumb && item.img.getAttribute("src") !== p.thumb) item.img.src = p.thumb;
         const text = summary(p);
-        if (item.sub.textContent !== text) item.sub.textContent = text;
-        item.sub.classList.toggle("err", p.status === "error");
+        if (item.sub.textContent !== text) {
+            item.sub.textContent = text;
+            item.sub.title = text;
+        }
+        const ready = p.status === "ready";
         // Amber when a face nobody asked to leave clear is unblurred, so it gets a second look
-        item.sub.classList.toggle("warn", p.status === "ready" && p.faces.some((f) => !f.blurred && !(f.match && names.has(f.match))));
+        const warn = ready && p.faces.some((f) => !f.blurred && !(f.match && names.has(f.match)));
+        item.sub.classList.toggle("err", p.status === "error");
+        item.sub.classList.toggle("warn", warn);
+        item.sub.classList.toggle("known", ready && !warn && p.faces.some((f) => !f.blurred));
+        item.sub.classList.toggle("working", p.status === "decoding" || p.status === "detecting");
         item.button.setAttribute("aria-current", String(p.id === state.currentId));
         if (item.button.previousElementSibling !== prev || item.button.parentNode !== els.list) {
             if (prev) prev.after(item.button);
@@ -771,6 +811,16 @@ function renderList() {
         item.button.remove();
         listItems.delete(id);
     }
+}
+
+function iconButton(icon, label) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-btn";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#${icon}"/></svg>`;
+    return button;
 }
 
 const chipItems = new Map();
@@ -793,22 +843,17 @@ function renderPeople() {
                 person.name = name.value;
                 render();
             });
-            const more = document.createElement("button");
-            more.type = "button";
-            more.className = "ghost small";
-            more.textContent = "+ photo";
-            more.title = "Add another photo of this person";
+            const more = iconButton("i-image-plus", "Add another photo of this person");
             more.addEventListener("click", () => {
                 state.addingTo = person;
                 els.personInput.click();
             });
-            const remove = document.createElement("button");
-            remove.type = "button";
-            remove.className = "remove";
-            remove.textContent = "×";
-            remove.setAttribute("aria-label", "Remove this person");
+            const remove = iconButton("i-x", "Remove this person");
             remove.addEventListener("click", () => removePerson(person));
-            root.append(faces, name, more, remove);
+            const actions = document.createElement("span");
+            actions.className = "person-actions";
+            actions.append(more, remove);
+            root.append(faces, name, actions);
             els.chips.append(root);
             chip = { root, faces, keys: "" };
             chipItems.set(person.id, chip);
@@ -833,33 +878,47 @@ function renderPeople() {
     els.peopleHint.hidden = state.people.length > 0 && state.photos.length > 0;
 }
 
+const setLabel = (button, text) => {
+    const span = button.querySelector("span");
+    if (span.textContent !== text) span.textContent = text;
+};
+
 function renderBar() {
     els.status.textContent = state.status;
     const total = state.photos.length;
     const done = state.photos.filter((p) => p.status === "ready" || p.status === "error").length;
-    const ready = done - state.photos.filter((p) => p.status === "error").length;
-    const failed = done - ready;
+    const failed = state.photos.filter((p) => p.status === "error").length;
+    const ready = done - failed;
     const busy = state.working || done < total || !!state.saving;
     document.body.classList.toggle("has-photos", total > 0);
-    els.progress.hidden = !total;
-    els.progress.classList.toggle("done", total > 0 && !busy);
-    els.progressBar.style.width = `${total ? (done / total) * 100 : 0}%`;
-    els.progressText.textContent = state.saving
-        ? state.saving
-        : done < total
-          ? `Blurring faces · ${done} of ${total}`
-          : busy
-            ? "Matching faces…"
-            : `${plural(ready, "photo")} ready${failed ? ` · ${failed} couldn't open` : ""}`;
 
-    for (const el of [els.addFolder, els.addPhotos, els.clear, els.zip]) el.hidden = !total;
-    els.addFolder.hidden = !total || touchFirst;
+    // A hairline under the top bar while photos are being blurred or saved
+    els.progress.hidden = !total || !(done < total || state.saving);
+    els.progressBar.style.transform = `scaleX(${state.saving ? state.saveProgress : done / Math.max(1, total)})`;
+    els.count.textContent = !total
+        ? ""
+        : done < total
+          ? `${done} of ${total}`
+          : state.working
+            ? `${total} · matching`
+            : failed
+              ? `${total} · ${failed} couldn't open`
+              : String(total);
+
+    els.addFolder.hidden = touchFirst;
+    els.zip.hidden = !total;
     els.save.hidden = !total || !canSaveFolder;
-    els.zip.className = canSaveFolder ? "ghost" : "primary";
+    els.zip.classList.toggle("primary", !canSaveFolder);
+    els.zip.classList.toggle("secondary", canSaveFolder);
     els.save.disabled = els.zip.disabled = busy || !ready;
-    els.save.textContent = ready && !busy ? `Save ${plural(ready, "photo")} to a folder` : "Save to a folder";
-    els.zip.textContent = !canSaveFolder && ready && !busy ? `Download ${plural(ready, "photo")} (ZIP)` : "Download ZIP";
+    setLabel(els.save, state.savingKind === "folder" ? `${state.saving}…` : "Save to folder");
+    setLabel(els.zip, state.savingKind === "zip" ? `${state.saving}…` : "Download ZIP");
     els.clear.disabled = !!state.saving;
+
+    const at = state.photos.findIndex((p) => p.id === state.currentId);
+    els.position.textContent = total && at >= 0 ? `${at + 1} / ${total}` : "";
+    els.prev.disabled = at <= 0;
+    els.next.disabled = at < 0 || at >= total - 1;
     els.undo.disabled = !current()?.history.length;
 }
 
@@ -872,8 +931,12 @@ function render() {
 
 // ---------- events ----------
 els.pickFolder.hidden = touchFirst;
-if (touchFirst) document.querySelector(".hintbar b").textContent = "Tap a face";
-if (touchFirst) els.pickPhotos.className = "primary big";
+if (touchFirst) {
+    els.hint.innerHTML = "<b>Tap a face</b> to blur or unblur it · <b>Drag</b> to blur one it missed";
+    els.pickPhotos.classList.replace("secondary", "primary");
+}
+els.prev.addEventListener("click", () => step(-1));
+els.next.addEventListener("click", () => step(1));
 
 const pick = (input) => () => input.click();
 els.pickFolder.addEventListener("click", pick(els.folderInput));
@@ -908,6 +971,7 @@ els.size.addEventListener("input", () => {
 const setPeek = (on) => {
     if (state.peek === on) return;
     state.peek = on;
+    els.peek.setAttribute("aria-pressed", String(on));
     render();
 };
 els.peek.addEventListener("pointerdown", () => setPeek(true));
@@ -1035,7 +1099,7 @@ window.addEventListener("dragover", (e) => {
     e.preventDefault();
     const people = onPeople(e);
     els.dropzone.classList.toggle("for-people", people);
-    els.dropzone.textContent = people ? "Drop to leave this person clear" : "Drop to blur these photos";
+    els.dropText.textContent = people ? "Drop to leave this person clear" : "Drop to blur these photos";
 });
 window.addEventListener("drop", (e) => {
     if (!hasFiles(e)) return;
