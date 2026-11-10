@@ -31,7 +31,7 @@ It's a static site with no server and no build step:
 - `decode.js` opens HEIC with [libheif-js](https://github.com/catdad-experiments/libheif-js) in browsers that can't do it natively.
 - `coi-sw.js` is a small service worker that adds the two headers browsers need before they let the models use several CPU threads. GitHub Pages can't send those headers itself.
 
-ONNX Runtime and libheif load from jsDelivr at pinned versions. The models are in `models/`.
+ONNX Runtime and libheif load from jsDelivr at pinned versions. The models are in `models/`. `demo/` holds the start screen's demo video in light and dark, recorded from the real app.
 
 To run it locally: `npm start`, then open http://localhost:5177.
 

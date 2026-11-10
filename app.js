@@ -135,7 +135,23 @@ async function shrink(bitmap, sx, sy, sw, sh, w, h) {
     ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, w, h);
     return URL.createObjectURL(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 }));
 }
-const photoThumb = (bitmap) => shrink(bitmap, 0, 0, bitmap.width, bitmap.height, 160, Math.max(1, Math.round((bitmap.height / bitmap.width) * 160)));
+// The list's thumbnail shows the photo as it will be saved, blur and all
+const thumbKey = (p) => `${p.faces.map((f) => (f.blurred ? 1 : 0)).join("")}|${state.size}`;
+async function updateThumb(p, bitmap) {
+    const key = thumbKey(p);
+    if (p.thumbKey === key) return;
+    p.thumbKey = key;
+    const scale = 160 / bitmap.width;
+    const canvas = new OffscreenCanvas(160, Math.max(1, Math.round(bitmap.height * scale)));
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingQuality = "high";
+    ctx.scale(scale, scale);
+    drawPhoto(ctx, bitmap, p.faces, state.size, true);
+    const url = URL.createObjectURL(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 }));
+    if (p.thumb) URL.revokeObjectURL(p.thumb);
+    p.thumb = url;
+    render();
+}
 function faceThumb(bitmap, f) {
     const side = Math.max(f.x2 - f.x1, f.y2 - f.y1) * 1.5;
     return shrink(bitmap, (f.x1 + f.x2) / 2 - side / 2, (f.y1 + f.y2) / 2 - side / 2, side, side, 96, 96);
@@ -324,7 +340,6 @@ async function processPhoto(p) {
         if (gone()) return bitmap.close();
         Object.assign(p, { blob, width: bitmap.width, height: bitmap.height, status: "detecting" });
         remember(p.id, bitmap);
-        p.thumb = await photoThumb(bitmap);
         render();
         let id = 1;
         p.faces = (await detectFaces(bitmap)).map((found) => ({
@@ -338,6 +353,7 @@ async function processPhoto(p) {
         }));
         if (fingerprints().length) await embedAll(p, bitmap);
         matchPhoto(p, fingerprints());
+        await updateThumb(p, bitmap);
         p.status = "ready";
     } catch (error) {
         console.error(error);
@@ -650,6 +666,7 @@ async function paint(p) {
         els.view.height = bitmap.height;
     }
     drawPhoto(els.view.getContext("2d"), bitmap, p.faces, state.size, !state.peek);
+    void updateThumb(p, bitmap);
 }
 
 let overlayKey = "";
@@ -734,8 +751,10 @@ function renderViewer() {
                 ? "Opening the photo…"
                 : "Finding faces…";
     els.stage.classList.toggle("peek", state.peek);
-    els.stage.classList.toggle("no-photo", !p.width);
-    if (!p.width) return;
+    // A photo only appears once its faces are found and blurred
+    const shown = p.width && p.status === "ready";
+    els.stage.classList.toggle("no-photo", !shown);
+    if (!shown) return;
     layout();
     drawOverlay(p);
     void paint(p);
@@ -922,11 +941,14 @@ function renderBar() {
     els.undo.disabled = !current()?.history.length;
 }
 
+// Set once the start-screen demo exists, further down
+let afterRender = () => {};
 function render() {
     renderBar();
     renderPeople();
     renderList();
     renderViewer();
+    afterRender();
 }
 
 // ---------- events ----------
@@ -1115,6 +1137,94 @@ window.addEventListener("beforeunload", (e) => {
     e.preventDefault();
     e.returnValue = "";
 });
+
+// ---------- the demo on the start screen ----------
+// One looping video; the three steps under it are its chapters. It plays on its own unless the
+// visitor prefers less motion, and stops once photos arrive.
+const demo = {
+    video: $("demo-video"),
+    play: $("demo-play"),
+    items: [...document.querySelectorAll("#chapters li")],
+    calm: matchMedia("(prefers-reduced-motion: reduce)").matches,
+    dark: matchMedia("(prefers-color-scheme: dark)"),
+    userPaused: false,
+    raf: 0,
+};
+// Each theme's recording has its own timing, in seconds
+const chapterStarts = () =>
+    (demo.dark.matches ? demo.video.dataset.chaptersDark : demo.video.dataset.chaptersLight).split(",").map(Number);
+
+function demoSource() {
+    const base = demo.dark.matches ? demo.video.dataset.dark : demo.video.dataset.light;
+    if (demo.video.dataset.base === base) return;
+    const at = demo.video.currentTime || 0;
+    const playing = !demo.video.paused;
+    demo.video.dataset.base = base;
+    demo.video.poster = `${base}.webp`;
+    demo.video.src = `${base}.mp4`;
+    demo.video.addEventListener(
+        "loadedmetadata",
+        () => {
+            demo.video.currentTime = at;
+            if (playing) void demo.video.play().catch(() => {});
+        },
+        { once: true },
+    );
+}
+
+function syncChapters() {
+    const t = demo.video.currentTime;
+    const end = demo.video.duration || Infinity;
+    const starts = chapterStarts();
+    demo.items.forEach((li, i) => {
+        const a = starts[i];
+        const b = starts[i + 1] ?? end;
+        const on = t >= a && t < b;
+        li.setAttribute("aria-current", on ? "step" : "false");
+        li.style.setProperty("--p", on && Number.isFinite(b) ? String(Math.min(1, (t - a) / (b - a))) : "0");
+    });
+}
+function demoTick() {
+    syncChapters();
+    if (!demo.video.paused) demo.raf = requestAnimationFrame(demoTick);
+}
+function syncDemo() {
+    const onStart = state.photos.length === 0;
+    if (!onStart && !demo.video.paused) demo.video.pause();
+    if (onStart && demo.video.paused && !demo.calm && !demo.userPaused) void demo.video.play().catch(() => {});
+}
+
+demo.video.addEventListener("play", () => {
+    demo.play.hidden = true;
+    cancelAnimationFrame(demo.raf);
+    demoTick();
+});
+demo.video.addEventListener("pause", () => {
+    demo.play.hidden = false;
+    syncChapters();
+});
+demo.video.addEventListener("click", () => {
+    demo.userPaused = !demo.video.paused;
+    if (demo.video.paused) void demo.video.play();
+    else demo.video.pause();
+});
+demo.play.addEventListener("click", () => {
+    demo.userPaused = false;
+    void demo.video.play();
+});
+demo.items.forEach((li, i) =>
+    li.querySelector(".chapter").addEventListener("click", () => {
+        demo.userPaused = false;
+        demo.video.currentTime = chapterStarts()[i];
+        void demo.video.play();
+        syncChapters();
+    }),
+);
+demo.dark.addEventListener("change", demoSource);
+demoSource();
+afterRender = syncDemo;
+if (demo.calm) demo.play.hidden = false;
+syncChapters();
 
 // ---------- start ----------
 state.ready = (async () => {

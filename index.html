@@ -151,24 +151,53 @@
             <section class="viewer-wrap">
                 <div class="viewer" id="viewer">
                     <div class="empty" id="empty">
-                        <h1>Blur every face in a folder of photos</h1>
-                        <p class="lede">It all happens in your browser. Your photos are never uploaded.</p>
-                        <div class="pick">
-                            <div class="pick-buttons">
-                                <button type="button" class="btn primary lg" id="pick-folder">
-                                    <svg class="icon"><use href="#i-folder-plus" /></svg><span>Choose a folder</span>
-                                </button>
-                                <button type="button" class="btn secondary lg" id="pick-photos">
-                                    <svg class="icon"><use href="#i-image-plus" /></svg><span>Choose photos</span>
+                        <div class="intro">
+                            <h1>Blur every face in a folder of photos</h1>
+                            <p class="lede">It all happens in your browser. Your photos are never uploaded.</p>
+                            <div class="pick">
+                                <div class="pick-buttons">
+                                    <button type="button" class="btn primary lg" id="pick-folder">
+                                        <svg class="icon"><use href="#i-folder-plus" /></svg><span>Choose a folder</span>
+                                    </button>
+                                    <button type="button" class="btn secondary lg" id="pick-photos">
+                                        <svg class="icon"><use href="#i-image-plus" /></svg><span>Choose photos</span>
+                                    </button>
+                                </div>
+                                <p class="formats">or drop them anywhere · JPG, PNG, HEIC, WebP, AVIF</p>
+                            </div>
+                        </div>
+                        <figure class="demo" id="demo">
+                            <div class="demo-frame">
+                                <video
+                                    id="demo-video"
+                                    muted
+                                    playsinline
+                                    loop
+                                    preload="auto"
+                                    data-light="./demo/demo-light"
+                                    data-dark="./demo/demo-dark"
+                                    data-chapters-light="0,6.33,12.11"
+                                    data-chapters-dark="0,6.47,12.2"
+                                    aria-label="A short demo: a person is added under Leave clear, a folder of photos is chosen and every other face is blurred, then the photos are checked and saved to a new folder."
+                                ></video>
+                                <button type="button" class="demo-play" id="demo-play" aria-label="Play the demo" hidden>
+                                    <svg class="icon" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" /></svg>
                                 </button>
                             </div>
-                            <p class="formats">or drop them anywhere · JPG, PNG, HEIC, WebP, AVIF</p>
-                        </div>
-                        <ol class="how">
-                            <li><b>Optional:</b> under <b>Leave clear</b>, add a photo of anyone who should stay visible.</li>
-                            <li>Choose your photos. Every other face is blurred.</li>
-                            <li>Check them, then save. You get a new folder of blurred copies; your originals aren't changed.</li>
-                        </ol>
+                            <ol class="how" id="chapters">
+                                <li>
+                                    <button type="button" class="chapter">
+                                        <b>Optional:</b> under <b>Leave clear</b>, add a photo of anyone who should stay visible.
+                                    </button>
+                                </li>
+                                <li><button type="button" class="chapter">Choose your photos. Every other face is blurred.</button></li>
+                                <li>
+                                    <button type="button" class="chapter">
+                                        Check them, then save. You get a new folder of blurred copies; your originals aren't changed.
+                                    </button>
+                                </li>
+                            </ol>
+                        </figure>
                         <p class="credit">
                             Saved photos carry no location or camera details. The tool can miss faces that are turned away or mostly hidden, so
                             check every photo before you share it. Faces are found with InsightFace's SCRFD and ArcFace models (non-commercial use)
